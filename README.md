@@ -11,21 +11,61 @@ Try
 ros2 daemon stop && ros2 daemon start
 ```
 
+install nav2 please go to website
+
+
+to run pavproxy
+```bash
+mavproxy.py --master=/dev/ttyACM0 --baudrate 115200
+```
+
+
+
+```bash
+source pixhawk_ws & robot_ws
+```
+
 To run the microros agent
 ```bash
 ros2 run micro_ros_agent micro_ros_agent serial -b 115200 -D /dev/ttyACM1
 ```
-to run pavproxy
+
+Guided mode
 ```bash
-mavproxy.py --master=/dev/ttyACM0 --baudrate 115200
+ros2 service call /ap/mode_switch ardupilot_msgs/srv/ModeSwitch "{mode: 15}"
 ```
 
 ```bash
 ros2 service call /ap/arm_motors ardupilot_msgs/srv/ArmMotors "{arm: true}"
 ```
 
+To run the robot state
 ```bash
-ros2 service call /mavros/set_mode mavros_msgs/srv/SetMode "{custom_mode: 'GUIDED'}"
+ros2 launch robot_bringup robot_state_publisher.launch.py
+```
+
+To run the robot state
+```bash
+ros2 run robot_bridge cmd_vel_bridge
+```
+
+To run isaac
+```bash
+./isaac_ros-dev/src/isaac_ros_common/scripts/run_isaac.sh
+ros2 launch nvblox_examples_bringup realsense_nav2_example.launch.py
+ros2 launch nvblox_examples_bringup foxglove_bridge.launch.py
+```
+
+
+run manually
+```bash
+ros2 topic pub /ap/cmd_vel geometry_msgs/msg/TwistStamped "
+header:
+  frame_id: 'base_link'
+twist:
+  linear: {x: 0.5, y: 0.0, z: 0.0}
+  angular: {x: 0.0, y: 0.0, z: 0.0}
+" -r 10
 ```
 
 We will have 3 ws

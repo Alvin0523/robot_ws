@@ -1,66 +1,40 @@
-# robot_bringup/launch/robot_state_publisher.launch.py
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
 import os
-
-def launch_setup(context, *args, **kwargs):
-    desc_pkg = LaunchConfiguration('description_package').perform(context)
-    urdf_rel = LaunchConfiguration('urdf_relpath').perform(context)
-    use_sim  = LaunchConfiguration('use_sim_time').perform(context)
-
-    desc_share = get_package_share_directory(desc_pkg)
-    urdf_path = os.path.join(desc_share, urdf_rel)
-    if not os.path.exists(urdf_path):
-        raise FileNotFoundError(f"URDF not found: {urdf_path}")
-
-    with open(urdf_path, 'r') as f:
-        urdf_xml = f.read()
-
-    state_pub = Node(
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        name='robot_state_publisher',
-        output='screen',
-        parameters=[
-            {'use_sim_time': use_sim == 'true'},
-            {'robot_description': urdf_xml},
-        ],
-    )
-
-    # Optional: remove once a real /joint_states exists
-    joint_state_dummy = Node(
-        package='joint_state_publisher',
-        executable='joint_state_publisher',
-        name='joint_state_publisher',
-        output='screen',
-        parameters=[
-            {'use_sim_time': use_sim == 'true'},
-            {'robot_description': urdf_xml},
-        ],
-    )
-
-    return [state_pub, joint_state_dummy]
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import Command, LaunchConfiguration
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
-    description_package = DeclareLaunchArgument(
-        'description_package', default_value='robot_description',
-        description='Package that contains the URDF'
-    )
-    urdf_relpath = DeclareLaunchArgument(
-        'urdf_relpath', default_value='urdf/ugv_beast.urdf',
-        description='URDF path relative to the description package share dir'
-    )
-    use_sim_time = DeclareLaunchArgument(
-        'use_sim_time', default_value='false',
-        description='Use /clock if simulating'
+    # 1. FIND PACKAGE & DEFINE PATHS
+    pkg_share = FindPackageShare(package='robot_description').find('robot_description')
+    
+    # Set a default path to your URDF (change 'ugv.urdf' to your actual file name)
+    default_model_path = os.path.join(pkg_share, 'urdf', 'ugv_beast.urdf')
+
+    # 2. SETUP CONFIGURATION VARIABLES
+    # This allows you to read the 'model' argument from the CLI
+    model_path = LaunchConfiguration('model')
+
+    # 3. DEFINE THE NODES
+    robot_state_publisher_node = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        output='screen',
+        parameters=[{
+            # 'Command' reads the URDF file and converts it into a single text string
+            # 'xacro' is used here as a reader (it works even on plain .urdf files)
+            'robot_description': Command(['xacro ', model_path])
+        }]
     )
 
+    # 4. RETURN THE DESCRIPTION
     return LaunchDescription([
-        description_package,
-        urdf_relpath,
-        use_sim_time,
-        OpaqueFunction(function=launch_setup),
+        # Declare the argument so you can run: ros2 launch ... model:=/path/to/new.urdf
+        DeclareLaunchArgument(
+            name='model', 
+            default_value=default_model_path, 
+            description='Absolute path to robot model file'
+        ),
+        robot_state_publisher_node
     ])
