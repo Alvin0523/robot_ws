@@ -15,7 +15,7 @@ workspaces/
 │       └── isaac_ros_common/
 └── robot_ws/
 ```
-Clone the repo below instead of the official package:
+Clone the repo below instead of the official package:\
 [isaac_ros_nvblox](https://github.com/Alvin0523/isaac_ros_nvblox)\
 [isaac_ros_common](https://github.com/Alvin0523/isaac_ros_common)
 
