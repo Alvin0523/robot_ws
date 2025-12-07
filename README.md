@@ -10,6 +10,9 @@ This guide walks you through setting up an agentic autonomous navigation system 
 workspaces/
 ├── ardu_ws/
 ├── isaac_ros-dev/
+│   └── src/
+│       ├── isaac_ros_nvblox/
+│       └── isaac_ros_common/
 └── robot_ws/
 ```
 
