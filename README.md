@@ -6,6 +6,13 @@ This guide walks you through setting up an agentic autonomous navigation system 
 
 ## 📁 Step 1: Create Workspace Directory Structure
 
+```
+workspaces/
+├── ardu_ws/
+├── isaac_ros-dev/
+└── robot_ws/
+```
+
 Create the following workspace folders:
 
 - `ardu_ws` - ArduPilot ROS2 workspace
