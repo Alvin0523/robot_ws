@@ -1,288 +1,316 @@
-Create a pixhawk_ws for DDS communication by following ardupiulot/px4 website.
+# 🤖 Setup Guide: Autonomous Navigation Multi-Domain Robot
 
-After setting up if u cant see ros2 topics even after the following:
-1. Set up ROS_DOMAIN_ID
-2. Set the correct Serial Port & Baud Rate
-3. Ensure DDS is enabled
+This guide walks you through setting up an agentic autonomous navigation system for a multi-domain robot using Isaac ROS, ArduPilot, and ROS2 by @Alvin_0523
 
-Try 
+---
 
-```bash 
-ros2 daemon stop && ros2 daemon start
-```
+## 📁 Step 1: Create Workspace Directory Structure
 
-install nav2 please go to website
+Create the following workspace folders:
 
+- `ardu_ws` - ArduPilot ROS2 workspace
+- `isaac_ros-dev` - Isaac ROS development workspace
+- `robot_ws` - Robot-specific workspace
 
-to run pavproxy
-```bash
-mavproxy.py --master=/dev/ttyACM0 --baudrate 115200
-```
+---
 
+## ⚙️ Step 2: Configure Jetson Environment
 
+Add the following to your `~/.bashrc` file on the host Jetson:
 
 ```bash
-source pixhawk_ws & robot_ws
+export ISAAC_ROS_WS=/home/agx/workspaces/isaac_ros-dev/
+export ROS_DOMAIN_ID=30
 ```
 
-To run the microros agent
+---
+
+## 📷 Step 3: Setup Isaac ROS (Jetson & Sensors)
+
+### 3.1 Visual SLAM Setup
+
+Install assets and run the command outside the container:
+
+```bash
+sudo apt install ros-humble-isaac-ros-visual-slam
+```
+
+Run the Docker container, build with colcon, and launch the file directly to test.
+
+### 3.2 Nvblox & RealSense Setup
+
+Follow the [RealSense Camera Examples](https://nvidia-isaac-ros.github.io/v/release-3.2/concepts/scene_reconstruction/nvblox/tutorials/tutorial_realsense.html) documentation.
+
+Install assets, run the installation command, then launch the Docker container to run the `realsense_example`.
+
+---
+
+## 🚁 Step 4: Setup Pixhawk with ArduPilot
+
+**Why ArduPilot?** We use ArduPilot (ArduRover) instead of PX4 because it supports encoder reading for wheeled AMRs.
+
+### 4.1 Environment Setup
+
+Follow the [ROS 2 — Dev documentation](https://ardupilot.org/dev/docs/ros2.html). Read the top section and ensure the environment is properly configured.
+
+**⚠️ Important:** Enable DDS in the firmware to allow DDS communication between Pixhawk and Jetson. If your Pixhawk wasn't flashed with DDS enabled, follow the [Building Setup Guide](https://ardupilot.org/dev/docs/building-setup-linux.html#building-setup-linux).
+
+### 4.2 Docker Setup for ArduPilot
+
+Follow the Docker installation section in the [ROS 2 documentation](https://ardupilot.org/dev/docs/ros2.html).
+
+Run the following commands inside the container (Ubuntu setup):
+
+```bash
+sudo apt update
+rosdep update
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+
+# Tip: Add these to your Dockerfile for easier development
+```
+
+Test the installation:
+
+```bash
+microxrceddsgen -help
+```
+
+### 4.3 Build ArduPilot Workspace
+
+```bash
+cd ~/ardu_ws
+colcon build --packages-up-to ardupilot_dds_tests
+```
+
+### 4.4 Create Docker Launch Script
+
+Create a script in `ardu_ws/scripts/` (e.g., `run_docker.sh`):
+
+```bash
+#!/bin/bash
+### --- Configuration ---
+IMAGE_NAME="ardupilot/ardupilot-dev-ros:latest"     # Your built image
+CONTAINER_NAME="ardupilot_dds"                  # Container name
+HOST_WS="$HOME/workspaces/ardu_ws"                             # Workspace on Jetson
+INNER_WS="/workspaces/ardu_ws"                            # Workspace inside container
+
+### --- 1. If container already running → attach ---
+if [ "$(docker ps -q -f name=$CONTAINER_NAME)" ]; then
+    echo "✅ Container '$CONTAINER_NAME' is already running."
+    echo "🔗 Attaching to existing container..."
+    docker exec -it $CONTAINER_NAME bash
+    exit 0
+fi
+
+### --- 2. Remove stopped container (same name) ---
+if [ "$(docker ps -aq -f status=exited -f name=$CONTAINER_NAME)" ]; then
+    echo "🧹 Removing old stopped container '$CONTAINER_NAME'..."
+    docker rm $CONTAINER_NAME > /dev/null
+fi
+
+### --- 3. Ensure workspace exists ---
+mkdir -p "$HOST_WS"
+
+### --- 4. Run fresh container ---
+echo "🚀 Starting ArduPilot ROS2 Dev Container..."
+docker run -it --rm \
+    --name "$CONTAINER_NAME" \
+    --network host \
+    --privileged \
+    --ipc=host \
+    --workdir /workspaces/ardu_ws \
+    -e DISPLAY=$DISPLAY \
+    -e ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0} \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v $HOME/.Xauthority:/root/.Xauthority:rw \
+    -v "$HOST_WS":"$INNER_WS" \
+    "$IMAGE_NAME"
+```
+
+**Note:** For ROS2 setup on Pixhawk firmware, refer to [Setting up the Build Environment](https://ardupilot.org/dev/docs/building-setup-linux.html#building-setup-linux). **Ensure DDS is enabled!**
+
+---
+
+## 🤖 Step 5: Setup Robot Workspace
+
+Clone the `robot_ws` repository and build:
+
+```bash
+cd ~/robot_ws
+colcon build
+```
+
+You're now ready to run the full system! 🎉
+
+---
+
+# ▶️ Running the Full Setup
+
+## 🚁 ArduPilot Workspace (`ardu_ws`)
+
+### Terminal 1: Launch Docker Container
+
+Run the Docker script:
+
+```bash
+./ardu_ws/scripts/run_docker.sh
+```
+
+### Terminal 2: Start Micro-ROS Agent
+
 ```bash
 ros2 run micro_ros_agent micro_ros_agent serial -b 115200 -D /dev/ttyACM1
 ```
 
-Guided mode
+### Terminal 3: Configure Pixhawk
+
+**Set to Guided Mode:**
+
 ```bash
 ros2 service call /ap/mode_switch ardupilot_msgs/srv/ModeSwitch "{mode: 15}"
 ```
+
+**Arm Motors:**
 
 ```bash
 ros2 service call /ap/arm_motors ardupilot_msgs/srv/ArmMotors "{arm: true}"
 ```
 
-To run the robot state
+### Optional: Run MAVProxy (CLI QGC)
+
+```bash
+mavproxy.py --master=/dev/ttyACM0 --baudrate 115200
+```
+
+---
+
+## 🤖 Robot Workspace (`robot_ws`)
+
+### Terminal 1: Publish Robot State
+
 ```bash
 ros2 launch robot_bringup robot_state_publisher.launch.py
 ```
 
-To run the robot state
+This publishes the TF of the robot frame.
+
+### Terminal 2: Bridge Command Velocity
+
 ```bash
-ros2 run robot_bridge cmd_vel_bridge
+ros2 run robot_bridge cmd_velocity_bridge
 ```
 
-To run isaac
+Outputs `cmd_vel` to `/ap/cmd_vel`.
+
+---
+
+## 📷 Isaac ROS Docker
+
+### Terminal 1: Launch RealSense with 3D Reconstruction
+
 ```bash
-./isaac_ros-dev/src/isaac_ros_common/scripts/run_isaac.sh
-ros2 launch nvblox_examples_bringup realsense_nav2_example.launch.py
-ros2 launch nvblox_examples_bringup foxglove_bridge.launch.py
+ros2 launch nvblox_example_bringup realsense_example.launch.py
 ```
 
+### Terminal 2: Launch Nav2
 
-run manually
 ```bash
-ros2 topic pub /ap/cmd_vel geometry_msgs/msg/TwistStamped "
-header:
-  frame_id: 'base_link'
-twist:
-  linear: {x: 0.5, y: 0.0, z: 0.0}
-  angular: {x: 0.0, y: 0.0, z: 0.0}
-" -r 10
+ros2 launch nvblox_example_bringup htx_nav2.launch.py
 ```
 
-We will have 3 ws
-1. base_ws (Robot Specific)
-2. pixhawk_ws (PX4/Ardupilot)
-3. isaac_ros_ws
+---
+
+## 🎮 Teleoperation (Optional)
+
+To control the robot via keyboard, run in `robot_ws`:
 
 ```bash
-base_ws/
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+---
+
+**✅ Setup Complete!** Your autonomous navigation system is now running.
+
+---
+
+## ❓ Troubleshooting FAQ
+
+### ROS2 Topics Not Found or Weird Behavior
+
+If all settings are correct but topics aren't appearing or behaving strangely, restart the ROS2 daemon:
+
+```bash
+ros2 daemon stop && ros2 daemon start
+```
+
+### Running MAVProxy CLI on Jetson
+
+To use MAVProxy as a command-line ground control station:
+
+```bash
+mavproxy.py --master=/dev/ttyACM0 --baudrate 115200
+```
+
+---
+
+# 🔧 robot_ws — Robot Base Workspace
+
+**Purpose:** Provides the robot's *core infrastructure* — URDF description, TF tree, bringup scripts, teleoperation, and diagnostics — enabling the autonomy stack in `isaac_ros_ws` (Nav2, NVBlox, perception) to interface cleanly with hardware data from `ardu_ws` (ArduPilot AP_DDS).
+
+> This workspace contains **no autonomy logic** (no mapping, planning, or decision-making). It is purely the robot's hardware abstraction layer and is reusable across different robot platforms.
+> 
+
+## 📦 Package Structure
+
+```
+robot_ws/
   src/
-    base_description/   # URDF/Xacro + meshes + RViz config; publishes robot_description via RSP
-    base_bringup/       # Starts description + TF relays + teleop (twist_mux) + minimal remaps
-    base_diagnostics/   # Health/heartbeat, topic-rate & TF checks, battery & thermals
+    robot_description/   # URDF/Xacro + meshes + RViz config; publishes robot_description via robot_state_publisher
+    robot_bringup/       # Launch files for description + TF relays + teleop (twist_mux) + topic remapping
+    robot_bridge/        # Bridges between standard ROS2 topics and ArduPilot-specific topic
 ```
 
-Here’s a crisp README you can paste into your repo. It spells out **what each package does**, **what goes inside**, and **how this base workspace interfaces** with `isaac_ros_ws` (autonomy) and `ardu_ws` (AP\_DDS).
+## 🔗 Workspace Dependencies
+
+You must source these upstream workspaces **before** building or running `robot_ws`:
+
+- `isaac_ros_ws` — NVIDIA Isaac ROS stack (perception, Nav2, NVBlox, RealSense drivers)
+- `ardu_ws` — ArduPilot DDS + micro-ROS agent + ArduPilot message definitions
 
 ---
 
-# base\_ws — Robot Base Workspace (no autonomy)
+## ⚙️ System Contracts (Must-Have Requirements)
 
-**Purpose:** Provide the robot’s *plumbing* only — description (URDF/TF), bringup, teleop, and health checks — so the autonomy stack in **`isaac_ros_ws`** (Nav2, NVBlox, perception) can run cleanly against hardware data coming from **`ardu_ws`** (ArduPilot AP\_DDS).
+These are **non-negotiable** requirements for proper integration with the autonomy stack:
 
-> No mapping, planning, or “intelligence” lives here. This workspace is reusable across robots.
+### 1. TF Tree Structure
 
-## Workspace layout
+- **Required frames:** `map` → `odom` → `base_link`
+- **Rule:** Only **one** node may publish the `odom` → `base_link` transform
+- Additional frames: `base_footprint`, `imu_link`, `camera_link`, sensor frames
 
-```
-base_ws/
-  src/
-    base_description/   # URDF/Xacro + meshes + RViz config; publishes robot_description via RSP
-    base_bringup/       # Starts description + TF relays + teleop (twist_mux) + minimal remaps
-    base_diagnostics/   # Health/heartbeat, topic-rate & TF checks, battery & thermals
-```
+### 2. TF Topics
 
-Upstream workspaces you must source **before** `base_ws`:
+- All TF data must be published on `/tf` and `/tf_static`
+- If ArduPilot publishes on `/ap/tf` and `/ap/tf_static`, relay to standard topic names
 
-* `isaac_ros_ws` — NVIDIA/Isaac ROS (perception, Nav2, NVBlox, RealSense wrappers, etc.)
-* `ardu_ws` — AP\_DDS + micro-ROS agent + AP messages
+### 3. Odometry Topic
 
-```bash
-source /workspaces/isaac_ros_ws/install/setup.bash
-source /workspaces/ardu_ws/install/setup.bash
-source /workspaces/base_ws/install/setup.bash
-```
+- Nav2 expects `/odom` (`nav_msgs/Odometry`)
+- If ArduPilot doesn't provide standard odometry, create an adapter node
 
----
+### 4. Command Velocity Mapping
 
-## Contracts (non-negotiable)
+- Autonomy/teleop outputs: `/cmd_vel` (`geometry_msgs/Twist`)
+- ArduPilot expects: `/ap/cmd_vel`
+- **Solution:** Remap or bridge `/cmd_vel` → `/ap/cmd_vel` in `robot_bridge`
 
-* **Frames:** continuous `map`→`odom` (optional if pure odom) and **always** `odom`→`base_link`.
-  Only **one** node may publish `odom→base_link`.
-* **TF topics:** Consumers expect `/tf` and `/tf_static`. If AP publishes `/ap/tf*`, relay to the standard names.
-* **Odometry:** Autonomy expects `/odom` (`nav_msgs/Odometry`). If AP doesn’t provide it, a tiny adapter must.
-* **Velocity:** Autonomy/teleop output `/cmd_vel` → **remap** to `/ap/cmd_vel` for ArduPilot.
-* **Time:** All nodes on the same wall clock; avoid mixed `use_sim_time` on hardware.
+### 5. Time Synchronization
+
+- All nodes must use the same wall clock time
+- Avoid mixing `use_sim_time:=true` and `use_sim_time:=false` on real hardware
+- Ensure Jetson system time is synchronized (use NTP if needed)
 
 ---
-
-## Package descriptions
-
-### 1) `base_description` — Robot geometry & frames
-
-**Responsibility**
-
-* Define the robot model and canonical frames (`base_footprint`, `base_link`, `imu_link`, `camera_link`, etc.).
-* Publish `robot_description` via `robot_state_publisher` (RSP).
-* Provide an RViz view for quick visual sanity checks.
-
-**Contains**
-
-```
-base_description/
-  urdf/        # xacro/urdf files (e.g., ugv_common.xacro, ugv_rover.xacro)
-  meshes/      # STL/DAE meshes referenced as package://base_description/meshes/...
-  launch/      # view_robot.launch.py (RSP + optional RViz)
-  rviz/        # view_description.rviz
-  package.xml, CMakeLists.txt  # install urdf/meshes/launch/rviz to share/
-```
-
-**Does NOT**
-
-* Publish odom/map TFs.
-* Start sensors or autonomy nodes.
-
----
-
-### 2) `base_bringup` — Minimal runtime wiring on the robot
-
-**Responsibility**
-
-* Start the description (RSP).
-* Relay TF if AP publishes under `/ap/tf*` → `/tf*`.
-* Set up teleop arbitration (`twist_mux`) and remap `/cmd_vel → /ap/cmd_vel`.
-* Optionally include **sensor drivers only** if they aren’t already launched from `isaac_ros_ws` (keep autonomy there).
-
-**Contains**
-
-```
-base_bringup/
-  launch/
-    robot_bringup.launch.py     # RSP + static TFs (if needed) + TF relays
-    teleop.launch.py            # joy + teleop_twist_joy + twist_mux
-    system.launch.py            # includes bringup + teleop (+ diagnostics)
-  config/
-    twist_mux.yaml              # teleop vs nav arbitration (if you use teleop)
-```
-
-**Typical inclusions**
-
-* `robot_state_publisher` with your xacro.
-* `topic_tools/relay` for:
-
-  * `/ap/tf → /tf`
-  * `/ap/tf_static → /tf_static`
-* `twist_mux` outputting `/cmd_vel`, remapped to `/ap/cmd_vel`.
-* (Optional) a 40-line odometry adapter if AP doesn’t publish `/odom`.
-
-**Does NOT**
-
-* Run Nav2, NVBlox, or perception graphs (those live in `isaac_ros_ws`).
-
----
-
-### 3) `base_diagnostics` — Health & readiness
-
-**Responsibility**
-
-* Emit `/diagnostics` with clear **WARN/ERROR** when plumbing breaks *before* autonomy fails.
-* Provide a single “am I ready?” gate for higher stacks.
-
-**Checks worth implementing**
-
-* **AP link:** rate & age on `/ap/twist/filtered` and `/ap/pose/filtered`; heartbeat on any `/ap/*` topic.
-* **TF integrity:** single publisher for `odom→base_link`, no frame ID conflicts, TF age < 0.2 s.
-* **Sensors:** RealSense/depth/pointcloud ≥ expected Hz; NVBlox inputs (if launched elsewhere) not stale.
-* **Time skew:** header stamps not > ±200 ms from system time.
-* **Power/Thermals:** parse `/ap/battery` → `sensor_msgs/BatteryState`; Jetson temps (tegrastats) + throttling flag.
-* **Command path:** `twist_mux` active source + `/estop` lock line.
-
-**Contains**
-
-```
-base_diagnostics/
-  src/health_node.py            # diagnostic_updater producers
-  config/diagnostics.yaml       # diagnostic_aggregator tree
-  launch/diagnostics.launch.py
-```
-
-**Does NOT**
-
-* Own business logic; it only reports and gates readiness.
-
----
-
-## Launching (example)
-
-```bash
-# 1) Description + TF relays + teleop mux
-ros2 launch base_bringup system.launch.py
-
-# Autonomy runs elsewhere, e.g.:
-# 2) Isaac/Perception/Nav (from isaac_ros_ws)
-ros2 launch <your_isaac_nav_stack> nav_system.launch.py
-
-# AP_DDS is normally a service/container from ardu_ws, already running.
-```
-
----
-
-## Topic & frame mapping (summary)
-
-| What              | Producer (typical)       | Consumer expects    | Notes                                   |
-| ----------------- | ------------------------ | ------------------- | --------------------------------------- |
-| TF, TF static     | AP\_DDS → `/ap/tf*`      | `/tf`, `/tf_static` | Relay in `base_bringup` if names differ |
-| Odom (`/odom`)    | AP\_DDS **or** adapter   | Nav/Isaac           | Provide `nav_msgs/Odometry`             |
-| Cmd vel           | teleop / autonomy        | `/ap/cmd_vel`       | Use `twist_mux`; remap once             |
-| Robot description | `base_description` (RSP) | everyone            | Source of truth for frames              |
-
-**Rule:** exactly **one** publisher for `odom→base_link`.
-
----
-
-## Common pitfalls (and how we avoid them here)
-
-* **Duplicate `odom→base_link` TF** (AP + EKF both publishing) → Single owner policy; diagnostics flags duplicate pubs.
-* **TF under `/ap/*`** unseen by other nodes → Relays to `/tf*` in bringup.
-* **No Odometry** → Tiny adapter publishes `/odom` from AP pose+twist.
-* **Nav2 inside base\_ws** → Forbidden by design; keep autonomy in `isaac_ros_ws`.
-
----
-
-## Extending to another robot
-
-Swap only:
-
-* new xacro/meshes in `base_description`,
-* updated static transforms in `base_bringup`,
-* thresholds in `base_diagnostics`.
-
-`isaac_ros_ws` and `ardu_ws` remain untouched. That’s the whole point.
-
----
-
-## Quick build
-
-```bash
-# Underlays
-source /workspaces/isaac_ros_ws/install/setup.bash
-source /workspaces/ardu_ws/install/setup.bash
-
-# Build & source base_ws
-cd /workspaces/base_ws
-colcon build --symlink-install
-source install/setup.bash
-```
-
----
-
-If you want, I can also drop a minimal `system.launch.py` and `twist_mux.yaml` tailored to your current topics so you can run this end-to-end immediately.
